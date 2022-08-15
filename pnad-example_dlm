@@ -12,7 +12,7 @@
 # x_t = x_{t-1} + a * stoch_t-1 + k_t, onde k_t~N(0,W)
 # x_{t-1} = x_{t-1} + w_t, onde w_t~N(0,0)
 # x_{t-2} = x_{t-2} + v_t, onde v_t~N(0,0)
-# stoch_t = stoch_{t-1} + e_t, onde e_t~N(0,W)
+# stoch_t = a * stoch_{t-1} + e_t, onde e_t~N(0,W)
 
 ## Lendo dados e estimando priors ----
 require(dlm)
