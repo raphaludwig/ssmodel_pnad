@@ -1,0 +1,115 @@
+# Mensalização PNAD via State-Space Model ----
+## Representação em modo de Espaço-Estado ----
+
+# PNAD é representada por um modelo de espaço estado de primeira ordem (local-level)
+# Ruidos do modelo tem distribuição assumida como Normal, tornando possível estimação
+# por Filtro de Kalman
+
+# Observation Equation: y_t = f(Theta_t)
+# X_t = (x_t + x_{t-1} + x_{t-2})/2 + u_t, onde u_t~N(0,0)
+
+# Evolution Equation: Theta_t=f(Theta_{t-1})
+# x_t = x_{t-1} + a * stoch_t-1 + k_t, onde k_t~N(0,W)
+# x_{t-1} = x_{t-1} + w_t, onde w_t~N(0,0)
+# x_{t-2} = x_{t-2} + v_t, onde v_t~N(0,0)
+# stoch_t = stoch_{t-1} + e_t, onde e_t~N(0,W)
+
+## Lendo dados e estimando priors ----
+require(dlm)
+require(forecast)
+require(tidyverse)
+require(lubridate)
+
+yt <- DB_14MORE$tx_desoc_14more # taxa de desemprego nesse exemplo
+
+prior_xt <- yt[3:1]
+prior_W <- Arima(Arima(yt,c(1,0,0))$residuals,c(1,0,0))$sigma2
+prior_a <- Arima(Arima(yt,c(1,0,0))$residuals,c(1,0,0)) %>% coef %>% .[1]
+
+## Montando modelo no DLM para estimar a e W por ML ----   
+model <- function(x) {
+  
+  FF <- matrix(c(1/3,1/3,1/3,0), nr=1)
+  V  <- matrix(0)
+  
+  GG <- matrix(c(1,0,0,x[1],
+                 1,0,0,0,
+                 0,1,0,0,
+                 0,0,0,1),
+               nrow=4,
+               ncol=4,
+               byrow=T)     
+  W  <- diag(c(exp(x[2]),0,0,exp(x[2]))) 
+  
+  m0 <- c(prior_xt,1)
+  C0 <- diag(c(prior_W,
+               0,
+               0,
+               prior_W))
+  
+  dlm(FF=FF, V=V, GG=GG, W=W, m0=m0,C0=C0)
+}
+
+## Parâmetros estimados ----
+fit <- dlmMLE(yt, parm = c(0,0), build = model)
+dlmy1 <- model(fit$par)
+
+## Filtro de Kalman ----
+# Uma vez estimados os parâmetros, posso usar filtro de Kalman
+pnadFilt <- dlmFilter(yt, dlmy1)
+pnadSmooth <- dlmSmooth(pnadFilt)
+
+## Resultados ----
+db_graph <-
+DB_14MORE %>% 
+  bind_cols(tx_desoc_14more_m_filter=pnadFilt$m[,1][-1],
+            tx_desoc_14more_m_smooth=pnadSmooth$s[,1][-1]) %>% 
+  mutate(date=ym(last_month_mq)) %>% 
+  select(date,
+         tx_desoc_14more,
+         tx_desoc_14more_m_filter,
+         tx_desoc_14more_m_smooth) %>% 
+  pivot_longer(-date)
+
+ggplot(db_graph,aes(x=date)) +
+  geom_line(aes(y=value, color=name), size=0.8) +
+  theme_minimal() + xlab("") + ylab("") +
+  scale_color_manual(values = c("#4F3A27","#C94841","#77A3AB","#F7B55A"),
+                     labels = c("Trimestral",
+                                "Mensalizada Filtro",
+                                "Mensalizado Smooth")) +
+  scale_x_date(date_labels = "%b %Y",
+               breaks = seq(from = as.Date(paste(year(min(db_graph$date)),
+                                                 month(min(db_graph$date)),
+                                                 "01",
+                                                 sep="-")), 
+                            to = max(db_graph$date),length.out=13),
+               expand = expansion(mult = c(0.01,0.01))) +
+  scale_y_continuous(n.breaks = 8) +
+  labs(title="Evolução da Taxa de Desemprego",
+       subtitle = "%",
+       caption = "Fonte: IBGE/SIDRA, e Vista Capital") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_line(colour="lightgray", size=0.1),
+        panel.grid.minor.y = element_line(colour="lightgray", size=0.1),
+        legend.position = "none",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        text=element_text(colour=pal_Vista("darkgray1"), 
+                          family="Segoe UI Semibold"),
+        plot.title=element_text(face="bold"),
+        legend.title=element_blank(),
+        legend.box = "horizontal") +
+  guides(col = guide_legend(direction = "horizontal"),
+         fill = guide_legend(direction = "horizontal")) +
+  theme(legend.position=c(1, 1.015),
+        legend.justification="right",
+        plot.title = element_text(vjust = 1.5),
+        plot.subtitle = element_text(vjust = 3.75))
+
+# Simple Graph
+plot(pnadSmooth$s[,1],type="l")
+lines(pnadFilt$m[,1],col="red")
+
+(pnadFilt$m[,1]*100) %>% round(1)
+(pnadSmooth$s[,1]*100) %>% round(1)
