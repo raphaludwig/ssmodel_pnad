@@ -1,3 +1,4 @@
+
 # Mensalização PNAD via State-Space Model ----
 ## Representação em modo de Espaço-Estado ----
 
@@ -12,7 +13,7 @@
 # x_t = x_{t-1} + a * stoch_t-1 + k_t, onde k_t~N(0,W)
 # x_{t-1} = x_{t-1} + w_t, onde w_t~N(0,0)
 # x_{t-2} = x_{t-2} + v_t, onde v_t~N(0,0)
-# stoch_t = a * stoch_{t-1} + e_t, onde e_t~N(0,W)
+# stoch_t = stoch_{t-1} + e_t, onde e_t~N(0,W)
 
 ## Lendo dados e estimando priors ----
 require(dlm)
@@ -23,6 +24,7 @@ require(lubridate)
 yt <- DB_14MORE$tx_desoc_14more # taxa de desemprego nesse exemplo
 
 prior_xt <- yt[3:1]
+prior_stoch <- Arima(yt,c(1,0,0))$residuals[1]
 prior_W <- Arima(Arima(yt,c(1,0,0))$residuals,c(1,0,0))$sigma2
 prior_a <- Arima(Arima(yt,c(1,0,0))$residuals,c(1,0,0)) %>% coef %>% .[1]
 
@@ -41,7 +43,7 @@ model <- function(x) {
                byrow=T)     
   W  <- diag(c(exp(x[2]),0,0,exp(x[2]))) 
   
-  m0 <- c(prior_xt,1)
+  m0 <- c(prior_xt,prior_stoch)
   C0 <- diag(c(prior_W,
                0,
                0,
@@ -51,7 +53,7 @@ model <- function(x) {
 }
 
 ## Parâmetros estimados ----
-fit <- dlmMLE(yt, parm = c(0,0), build = model)
+fit <- dlmMLE(yt, parm = c(prior_a,0), build = model)
 dlmy1 <- model(fit$par)
 
 ## Filtro de Kalman ----
